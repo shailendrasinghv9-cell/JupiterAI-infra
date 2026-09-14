@@ -4,45 +4,150 @@ trigger:
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
+stages:
 
-- script: |
-    sudo apt-get update
-    sudo apt-get install -y gnupg software-properties-common wget
-
-    wget -O- https://apt.releases.hashicorp.com/gpg | \
-      gpg --dearmor | \
-      sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | \
-      sudo tee /etc/apt/sources.list.d/hashicorp.list
-
-    sudo apt-get update
-    sudo apt-get install -y terraform
-
-    terraform version
-  displayName: 'Install Terraform'
-
-- script: |
-    terraform init
-  displayName: 'Terraform Init'
-
-- script: |
-    terraform validate
-  displayName: 'Terraform Validate'
-
-- task: AzureCLI@2
+# ==========================================
+# STAGE 1 - TERRAFORM PLAN
+# ==========================================
+- stage: TerraformPlan
   displayName: 'Terraform Plan'
-  inputs:
-    azureSubscription: 'JupiterAI-Azure-Connection'
-    scriptType: 'bash'
-    scriptLocation: 'inlineScript'
-    inlineScript: |
-      export ARM_USE_CLI=true
 
-      terraform plan \
-        -input=false \
-        -var="resource_group_name=JupiterAI-RG" \
-        -var="location=Central India" \
-        -var="storage_account_name=jupiterai2026storage" \
-        -var="environment=Dev"
+  jobs:
+  - job: Plan
+    displayName: 'Terraform Init, Validate and Plan'
+
+    steps:
+
+    - checkout: self
+
+    # Install Terraform
+    - script: |
+        sudo apt-get update
+        sudo apt-get install -y gnupg software-properties-common wget
+
+        wget -O- https://apt.releases.hashicorp.com/gpg | \
+          gpg --dearmor | \
+          sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | \
+          sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+        sudo apt-get update
+        sudo apt-get install -y terraform
+
+        terraform version
+      displayName: 'Install Terraform'
+
+    # Terraform Init with Azure authentication
+    - task: AzureCLI@2
+      displayName: 'Terraform Init'
+      inputs:
+        azureSubscription: 'JupiterAI-Azure-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          export ARM_USE_CLI=true
+          terraform init
+
+    # Terraform Validate
+    - script: |
+        terraform validate
+      displayName: 'Terraform Validate'
+
+    # Terraform Plan
+    - task: AzureCLI@2
+      displayName: 'Terraform Plan'
+      inputs:
+        azureSubscription: 'JupiterAI-Azure-Connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          export ARM_USE_CLI=true
+
+          terraform plan \
+            -input=false \
+            -out=tfplan \
+            -var="resource_group_name=JupiterAI-RG" \
+            -var="location=Central India" \
+            -var="storage_account_name=jupiterai2026storage" \
+            -var="environment=Dev"
+
+    # Publish Plan
+    - publish: $(System.DefaultWorkingDirectory)/tfplan
+      artifact: terraform-plan
+      displayName: 'Publish Terraform Plan'
+
+
+# ==========================================
+# STAGE 2 - PRODUCTION APPLY
+# ==========================================
+- stage: TerraformApply
+  displayName: 'Terraform Apply'
+  dependsOn: TerraformPlan
+  condition: succeeded()
+
+  jobs:
+
+  - deployment: TerraformProduction
+    displayName: 'Deploy Terraform to Production'
+
+    environment:
+      name: 'JupiterAI-Production'
+
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          - checkout: self
+
+          # Install Terraform
+          - script: |
+              sudo apt-get update
+              sudo apt-get install -y gnupg software-properties-common wget
+
+              wget -O- https://apt.releases.hashicorp.com/gpg | \
+                gpg --dearmor | \
+                sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
+
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | \
+                sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+              sudo apt-get update
+              sudo apt-get install -y terraform
+
+              terraform version
+            displayName: 'Install Terraform'
+
+          # Terraform Init with Azure authentication
+          - task: AzureCLI@2
+            displayName: 'Terraform Init'
+            inputs:
+              azureSubscription: 'JupiterAI-Azure-Connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                export ARM_USE_CLI=true
+                terraform init
+
+          # Download approved Terraform plan
+          - download: current
+            artifact: terraform-plan
+            displayName: 'Download Terraform Plan'
+
+          # Terraform Apply
+          - task: AzureCLI@2
+            displayName: 'Terraform Apply'
+            inputs:
+              azureSubscription: 'JupiterAI-Azure-Connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                export ARM_USE_CLI=true
+
+                terraform apply \
+                  -input=false \
+                  "$(Pipeline.Workspace)/terraform-plan/tfplan"
