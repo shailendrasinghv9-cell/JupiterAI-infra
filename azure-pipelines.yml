@@ -5,5 +5,19 @@ pool:
   vmImage: 'ubuntu-latest'
 
 steps:
-- script: echo "JupiterAI Pipeline Started"
-  displayName: 'Test Pipeline'
+
+# Install Terraform
+- task: TerraformInstaller@1
+  displayName: 'Install Terraform'
+  inputs:
+    terraformVersion: 'latest'
+
+# Initialize Terraform
+- script: |
+    terraform init
+  displayName: 'Terraform Init'
+
+# Validate Terraform configuration
+- script: |
+    terraform validate
+  displayName: 'Terraform Validate'
