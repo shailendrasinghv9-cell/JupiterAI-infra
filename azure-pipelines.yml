@@ -38,7 +38,7 @@ stages:
         terraform version
       displayName: 'Install Terraform'
 
-    # Terraform Init with Azure authentication
+    # Terraform Init
     - task: AzureCLI@2
       displayName: 'Terraform Init'
       inputs:
@@ -67,12 +67,12 @@ stages:
           terraform plan \
             -input=false \
             -out=tfplan \
-            -var="resource_group_name=JupiterAI-RG" \
-            -var="location=Central India" \
-            -var="storage_account_name=jupiterai2026storage" \
-            -var="environment=Dev"
+            -var="resource_group_name=$(resource_group_name)" \
+            -var="location=$(location)" \
+            -var="storage_account_name=$(storage_account_name)" \
+            -var="environment=$(environment)"
 
-    # Publish Plan
+    # Publish Terraform Plan
     - publish: $(System.DefaultWorkingDirectory)/tfplan
       artifact: terraform-plan
       displayName: 'Publish Terraform Plan'
@@ -122,7 +122,7 @@ stages:
               terraform version
             displayName: 'Install Terraform'
 
-          # Terraform Init with Azure authentication
+          # Terraform Init
           - task: AzureCLI@2
             displayName: 'Terraform Init'
             inputs:
