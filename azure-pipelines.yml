@@ -37,7 +37,10 @@ stages:
 
         terraform version
       displayName: 'Install Terraform'
-
+    # Terraform Format Check
+    - script: |
+        terraform fmt -check
+      displayName: 'Terraform Format Check'
     # Terraform Init
     - task: AzureCLI@2
       displayName: 'Terraform Init'
